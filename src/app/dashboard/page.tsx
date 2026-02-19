@@ -331,7 +331,8 @@ export default function Dashboard() {
         let endTime: string;
         if (eventFormData.allDay) {
           startTime = `${eventFormData.startDate}T00:00:00`;
-          endTime = `${eventFormData.endDate || eventFormData.startDate}T23:59:59`;
+          const nextDay = format(addDays(parseISO(eventFormData.endDate || eventFormData.startDate), 1), 'yyyy-MM-dd');
+          endTime = `${nextDay}T00:00:00`;
         } else {
           startTime = `${eventFormData.startDate}T${eventFormData.startTime}:00`;
           endTime = `${eventFormData.endDate || eventFormData.startDate}T${eventFormData.endTime}:00`;
@@ -357,7 +358,8 @@ export default function Dashboard() {
         let endTime: string;
         if (eventFormData.allDay) {
           startTime = `${eventFormData.startDate}T00:00:00`;
-          endTime = `${eventFormData.endDate || eventFormData.startDate}T23:59:59`;
+          const nextDay = format(addDays(parseISO(eventFormData.endDate || eventFormData.startDate), 1), 'yyyy-MM-dd');
+          endTime = `${nextDay}T00:00:00`;
         } else {
           startTime = `${eventFormData.startDate}T${eventFormData.startTime}:00`;
           endTime = `${eventFormData.endDate || eventFormData.startDate}T${eventFormData.endTime}:00`;
