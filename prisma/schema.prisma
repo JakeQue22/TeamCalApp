@@ -1,0 +1,109 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id            String    @id @default(uuid())
+  googleId      String    @unique
+  email         String    @unique
+  name          String?
+  picture       String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Google OAuth tokens (encrypted in production)
+  accessToken   String?
+  refreshToken  String?
+  tokenExpiry   DateTime?
+  
+  // Relations
+  teams         TeamMember[]
+  events        Event[]
+  preferences   UserPreference?
+}
+
+model UserPreference {
+  id              String  @id @default(uuid())
+  userId          String  @unique
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Display preferences
+  defaultView     String  @default("week") // day, week, month, schedule
+  timezone        String  @default("UTC")
+  weekStartsOn    Int     @default(0) // 0 = Sunday, 1 = Monday
+  workingHoursStart String @default("09:00")
+  workingHoursEnd   String @default("17:00")
+  
+  // Theme
+  theme           String  @default("light") // light, dark
+}
+
+model Team {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  members     TeamMember[]
+  calendars   TeamCalendar[]
+}
+
+model TeamMember {
+  id        String    @id @default(uuid())
+  teamId    String
+  userId    String
+  role      String    @default("member") // owner, admin, member
+  createdAt DateTime  @default(now())
+  
+  team      Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([teamId, userId])
+}
+
+model TeamCalendar {
+  id          String    @id @default(uuid())
+  teamId      String
+  calendarId  String    // Google Calendar ID
+  name        String
+  color       String?
+  visible     Boolean  @default(true)
+  createdAt   DateTime  @default(now())
+  
+  team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+}
+
+model Event {
+  id            String    @id @default(uuid())
+  googleEventId String?   @unique // Reference to Google Calendar event
+  userId        String
+  calendarId    String
+  title         String
+  description   String?
+  location      String?
+  startTime     DateTime
+  endTime       DateTime
+  allDay        Boolean  @default(false)
+  colorId       String?
+  status        String   @default("confirmed") // confirmed, tentative, cancelled
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Attendees stored as JSON
+  attendees     String?   // JSON string of attendee objects
+  
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, startTime])
+  @@index([calendarId, startTime])
+}
