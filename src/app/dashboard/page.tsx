@@ -323,19 +323,28 @@ export default function Dashboard() {
       setEventFormError('Title is required');
       return;
     }
+    if (!eventFormData.startDate) {
+      setEventFormError('Start date is required');
+      return;
+    }
+    if (eventModalMode === 'edit' && (!selectedEvent || !selectedEvent.id)) {
+      setEventFormError('No event selected for editing');
+      return;
+    }
     setEventFormSubmitting(true);
     setEventFormError('');
     try {
+      const endDateStr = eventFormData.endDate || eventFormData.startDate;
       if (eventModalMode === 'create') {
         let startTime: string;
         let endTime: string;
         if (eventFormData.allDay) {
           startTime = `${eventFormData.startDate}T00:00:00`;
-          const nextDay = format(addDays(parseISO(eventFormData.endDate || eventFormData.startDate), 1), 'yyyy-MM-dd');
+          const nextDay = format(addDays(parseISO(endDateStr), 1), 'yyyy-MM-dd');
           endTime = `${nextDay}T00:00:00`;
         } else {
           startTime = `${eventFormData.startDate}T${eventFormData.startTime}:00`;
-          endTime = `${eventFormData.endDate || eventFormData.startDate}T${eventFormData.endTime}:00`;
+          endTime = `${endDateStr}T${eventFormData.endTime}:00`;
         }
         const res = await fetch('/api/events/quick-add', {
           method: 'POST',
@@ -358,11 +367,11 @@ export default function Dashboard() {
         let endTime: string;
         if (eventFormData.allDay) {
           startTime = `${eventFormData.startDate}T00:00:00`;
-          const nextDay = format(addDays(parseISO(eventFormData.endDate || eventFormData.startDate), 1), 'yyyy-MM-dd');
+          const nextDay = format(addDays(parseISO(endDateStr), 1), 'yyyy-MM-dd');
           endTime = `${nextDay}T00:00:00`;
         } else {
           startTime = `${eventFormData.startDate}T${eventFormData.startTime}:00`;
-          endTime = `${eventFormData.endDate || eventFormData.startDate}T${eventFormData.endTime}:00`;
+          endTime = `${endDateStr}T${eventFormData.endTime}:00`;
         }
         const res = await fetch(`/api/events/${encodeURIComponent(selectedEvent!.id!)}`, {
           method: 'PUT',
