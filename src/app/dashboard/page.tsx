@@ -70,6 +70,19 @@ interface Team {
 
 type ViewMode = 'day' | 'week' | 'month' | 'schedule';
 
+interface EventFormData {
+  title: string;
+  description: string;
+  location: string;
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+  allDay: boolean;
+  calendarId: string;
+  colorId: string;
+}
+
 export default function Dashboard() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,6 +97,27 @@ export default function Dashboard() {
   const [showEventPanel, setShowEventPanel] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
 
+  // Event modal state
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [eventModalMode, setEventModalMode] = useState<'create' | 'edit'>('create');
+  const [eventFormData, setEventFormData] = useState<EventFormData>({
+    title: '', description: '', location: '',
+    startDate: '', startTime: '', endDate: '', endTime: '',
+    allDay: false, calendarId: '', colorId: '',
+  });
+  const [eventFormError, setEventFormError] = useState('');
+  const [eventFormSubmitting, setEventFormSubmitting] = useState(false);
+
+  // Delete confirmation state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+  // Create team state
+  const [showCreateTeam, setShowCreateTeam] = useState(false);
+  const [teamFormData, setTeamFormData] = useState({ name: '', description: '' });
+  const [teamFormError, setTeamFormError] = useState('');
+  const [teamFormSubmitting, setTeamFormSubmitting] = useState(false);
+
   useEffect(() => {
     checkAuth();
   }, []);
@@ -95,11 +129,51 @@ export default function Dashboard() {
     }
   }, [user]);
 
+  const fetchEvents = useCallback(async () => {
+    try {
+      let timeMin: Date, timeMax: Date;
+      
+      if (viewMode === 'day') {
+        timeMin = new Date(currentDate);
+        timeMin.setHours(0, 0, 0, 0);
+        timeMax = new Date(currentDate);
+        timeMax.setHours(23, 59, 59, 999);
+      } else if (viewMode === 'week') {
+        timeMin = startOfWeek(currentDate, { weekStartsOn: 1 });
+        timeMax = endOfWeek(currentDate, { weekStartsOn: 1 });
+      } else if (viewMode === 'month') {
+        // Fetch from start of first visible week to end of last visible week
+        const monthStart = startOfMonth(currentDate);
+        const monthEnd = endOfMonth(currentDate);
+        timeMin = startOfWeek(monthStart, { weekStartsOn: 1 });
+        timeMax = endOfWeek(monthEnd, { weekStartsOn: 1 });
+      } else {
+        // Schedule view - show 2 weeks
+        timeMin = startOfWeek(currentDate, { weekStartsOn: 1 });
+        timeMax = addDays(timeMin, 14);
+      }
+
+      const params = new URLSearchParams({
+        timeMin: timeMin.toISOString(),
+        timeMax: timeMax.toISOString(),
+        calendars: Array.from(visibleCalendars).join(','),
+      });
+
+      const res = await fetch(`/api/calendars/events?${params}`);
+      if (res.ok) {
+        const data: CalendarEvent[] = await res.json();
+        setEvents(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch events:', error);
+    }
+  }, [currentDate, viewMode, visibleCalendars]);
+
   useEffect(() => {
     if (user && calendars.length > 0) {
       fetchEvents();
     }
-  }, [user, currentDate, viewMode, visibleCalendars]);
+  }, [user, calendars.length, fetchEvents]);
 
   const checkAuth = async () => {
     try {
@@ -132,41 +206,6 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error('Failed to fetch calendars:', error);
-    }
-  };
-
-  const fetchEvents = async () => {
-    try {
-      let timeMin: Date, timeMax: Date;
-      
-      if (viewMode === 'day') {
-        timeMin = startOfWeek(currentDate);
-        timeMax = endOfWeek(currentDate);
-      } else if (viewMode === 'week') {
-        timeMin = startOfWeek(currentDate, { weekStartsOn: 1 });
-        timeMax = endOfWeek(currentDate, { weekStartsOn: 1 });
-      } else if (viewMode === 'month') {
-        timeMin = startOfMonth(currentDate);
-        timeMax = endOfMonth(currentDate);
-      } else {
-        // Schedule view - show 2 weeks
-        timeMin = startOfWeek(currentDate, { weekStartsOn: 1 });
-        timeMax = addDays(timeMin, 14);
-      }
-
-      const params = new URLSearchParams({
-        timeMin: timeMin.toISOString(),
-        timeMax: timeMax.toISOString(),
-        calendars: Array.from(visibleCalendars).join(','),
-      });
-
-      const res = await fetch(`/api/calendars/events?${params}`);
-      if (res.ok) {
-        const data: CalendarEvent[] = await res.json();
-        setEvents(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch events:', error);
     }
   };
 
@@ -233,6 +272,235 @@ export default function Dashboard() {
     }
   };
 
+  // --- Event Modal helpers ---
+
+  const getDefaultCalendarId = useCallback(() => {
+    const primary = calendars.find(c => c.primary);
+    return primary?.id || calendars[0]?.id || '';
+  }, [calendars]);
+
+  const openCreateEventModal = useCallback((prefillDate?: Date, prefillHour?: number) => {
+    const d = prefillDate || new Date();
+    const hour = prefillHour ?? d.getHours();
+    const startDate = format(d, 'yyyy-MM-dd');
+    const startTime = `${String(hour).padStart(2, '0')}:00`;
+    const endHour = Math.min(hour + 1, 23);
+    const endTime = `${String(endHour).padStart(2, '0')}:00`;
+    setEventFormData({
+      title: '', description: '', location: '',
+      startDate, startTime, endDate: startDate, endTime,
+      allDay: false, calendarId: getDefaultCalendarId(), colorId: '',
+    });
+    setEventFormError('');
+    setEventModalMode('create');
+    setShowEventModal(true);
+  }, [getDefaultCalendarId]);
+
+  const openEditEventModal = useCallback(() => {
+    if (!selectedEvent) return;
+    const start = selectedEvent.start?.dateTime ? parseISO(selectedEvent.start.dateTime) : null;
+    const end = selectedEvent.end?.dateTime ? parseISO(selectedEvent.end.dateTime) : null;
+    const isAllDay = !selectedEvent.start?.dateTime && !!selectedEvent.start?.date;
+    setEventFormData({
+      title: selectedEvent.summary || '',
+      description: selectedEvent.description || '',
+      location: selectedEvent.location || '',
+      startDate: start ? format(start, 'yyyy-MM-dd') : (selectedEvent.start?.date || ''),
+      startTime: start ? format(start, 'HH:mm') : '09:00',
+      endDate: end ? format(end, 'yyyy-MM-dd') : (selectedEvent.end?.date || ''),
+      endTime: end ? format(end, 'HH:mm') : '10:00',
+      allDay: isAllDay,
+      calendarId: selectedEvent.calendarId || getDefaultCalendarId(),
+      colorId: selectedEvent.colorId || '',
+    });
+    setEventFormError('');
+    setEventModalMode('edit');
+    setShowEventModal(true);
+  }, [selectedEvent, getDefaultCalendarId]);
+
+  const handleEventFormSubmit = useCallback(async () => {
+    if (!eventFormData.title.trim()) {
+      setEventFormError('Title is required');
+      return;
+    }
+    setEventFormSubmitting(true);
+    setEventFormError('');
+    try {
+      if (eventModalMode === 'create') {
+        let startTime: string;
+        let endTime: string;
+        if (eventFormData.allDay) {
+          startTime = `${eventFormData.startDate}T00:00:00`;
+          endTime = `${eventFormData.endDate || eventFormData.startDate}T23:59:59`;
+        } else {
+          startTime = `${eventFormData.startDate}T${eventFormData.startTime}:00`;
+          endTime = `${eventFormData.endDate || eventFormData.startDate}T${eventFormData.endTime}:00`;
+        }
+        const res = await fetch('/api/events/quick-add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: eventFormData.title.trim(),
+            startTime,
+            endTime,
+            allDay: eventFormData.allDay,
+            calendarId: eventFormData.calendarId,
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to create event');
+        }
+      } else {
+        // Edit mode
+        let startTime: string;
+        let endTime: string;
+        if (eventFormData.allDay) {
+          startTime = `${eventFormData.startDate}T00:00:00`;
+          endTime = `${eventFormData.endDate || eventFormData.startDate}T23:59:59`;
+        } else {
+          startTime = `${eventFormData.startDate}T${eventFormData.startTime}:00`;
+          endTime = `${eventFormData.endDate || eventFormData.startDate}T${eventFormData.endTime}:00`;
+        }
+        const res = await fetch(`/api/events/${encodeURIComponent(selectedEvent!.id!)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: eventFormData.title.trim(),
+            description: eventFormData.description,
+            location: eventFormData.location,
+            startTime,
+            endTime,
+            allDay: eventFormData.allDay,
+            calendarId: eventFormData.calendarId,
+            colorId: eventFormData.colorId || undefined,
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to update event');
+        }
+      }
+      setShowEventModal(false);
+      setShowEventPanel(false);
+      setSelectedEvent(null);
+      await fetchEvents();
+    } catch (error: unknown) {
+      setEventFormError(error instanceof Error ? error.message : 'An error occurred');
+    } finally {
+      setEventFormSubmitting(false);
+    }
+  }, [eventFormData, eventModalMode, selectedEvent, fetchEvents]);
+
+  // --- Delete handler ---
+
+  const handleDeleteEvent = useCallback(async () => {
+    if (!selectedEvent?.id) return;
+    setDeleteSubmitting(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedEvent.calendarId) {
+        params.set('calendarId', selectedEvent.calendarId);
+      }
+      const res = await fetch(`/api/events/${encodeURIComponent(selectedEvent.id)}?${params}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to delete event');
+      }
+      setShowDeleteConfirm(false);
+      setShowEventPanel(false);
+      setSelectedEvent(null);
+      await fetchEvents();
+    } catch (error) {
+      console.error('Delete failed:', error);
+      alert(error instanceof Error ? error.message : 'Failed to delete event');
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  }, [selectedEvent, fetchEvents]);
+
+  // --- Create Team handler ---
+
+  const handleCreateTeam = useCallback(async () => {
+    if (!teamFormData.name.trim()) {
+      setTeamFormError('Team name is required');
+      return;
+    }
+    setTeamFormSubmitting(true);
+    setTeamFormError('');
+    try {
+      const res = await fetch('/api/teams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: teamFormData.name.trim(),
+          description: teamFormData.description.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to create team');
+      }
+      setShowCreateTeam(false);
+      setTeamFormData({ name: '', description: '' });
+      await fetchTeams();
+    } catch (error: unknown) {
+      setTeamFormError(error instanceof Error ? error.message : 'An error occurred');
+    } finally {
+      setTeamFormSubmitting(false);
+    }
+  }, [teamFormData]);
+
+  // --- View renderers ---
+
+  const renderDayView = () => {
+    const hours = Array.from({ length: 24 }, (_, i) => i);
+
+    return (
+      <div className="week-view">
+        <div className="week-header">
+          <div className="time-gutter"></div>
+          <div className={`day-column-header ${isToday(currentDate) ? 'today' : ''}`}>
+            <span className="day-name">{format(currentDate, 'EEEE')}</span>
+            <span className="day-number">{format(currentDate, 'd')}</span>
+          </div>
+        </div>
+        <div className="week-body">
+          <div className="time-gutter">
+            {hours.map(hour => (
+              <div key={hour} className="time-slot">
+                {format(new Date(2000, 0, 1, hour, 0), 'h a')}
+              </div>
+            ))}
+          </div>
+          <div className="day-column">
+            {hours.map(hour => (
+              <div key={hour} className="hour-cell" onClick={() => openCreateEventModal(currentDate, hour)}>
+                {events
+                  .filter(e => {
+                    const eventStart = e.start?.dateTime ? parseISO(e.start.dateTime) : null;
+                    return eventStart && isSameDay(eventStart, currentDate) && eventStart.getHours() === hour;
+                  })
+                  .map(event => (
+                    <div
+                      key={event.id}
+                      className="event-block"
+                      style={{ backgroundColor: event.calendarColor || '#3F51B5' }}
+                      onClick={(e) => { e.stopPropagation(); handleEventClick(event); }}
+                    >
+                      {event.summary}
+                    </div>
+                  ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderWeekView = () => {
     const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
     const days = eachDayOfInterval({ start: weekStart, end: addDays(weekStart, 6) });
@@ -253,14 +521,14 @@ export default function Dashboard() {
           <div className="time-gutter">
             {hours.map(hour => (
               <div key={hour} className="time-slot">
-                {format(new Date().setHours(hour, 0), 'h a')}
+                {format(new Date(2000, 0, 1, hour, 0), 'h a')}
               </div>
             ))}
           </div>
           {days.map(day => (
             <div key={day.toISOString()} className="day-column">
               {hours.map(hour => (
-                <div key={hour} className="hour-cell" onClick={() => console.log('Create event at', day, hour)}>
+                <div key={hour} className="hour-cell" onClick={() => openCreateEventModal(day, hour)}>
                   {events
                     .filter(e => {
                       const eventStart = e.start?.dateTime ? parseISO(e.start.dateTime) : null;
@@ -285,13 +553,68 @@ export default function Dashboard() {
     );
   };
 
+  const renderMonthView = () => {
+    const monthStart = startOfMonth(currentDate);
+    const monthEnd = endOfMonth(currentDate);
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+    const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+    const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    return (
+      <div className="month-view">
+        <div className="month-header">
+          {weekDays.map(d => (
+            <div key={d} className="month-weekday">{d}</div>
+          ))}
+        </div>
+        <div className="month-grid">
+          {days.map(day => {
+            const dayEvents = events.filter(e => {
+              const eventStart = e.start?.dateTime
+                ? parseISO(e.start.dateTime)
+                : e.start?.date ? parseISO(e.start.date) : null;
+              return eventStart && isSameDay(eventStart, day);
+            });
+            const isCurrentMonth = day.getMonth() === currentDate.getMonth();
+            return (
+              <div
+                key={day.toISOString()}
+                className={`month-cell ${!isCurrentMonth ? 'other-month' : ''} ${isToday(day) ? 'today' : ''}`}
+                onClick={() => { setCurrentDate(day); setViewMode('day'); }}
+              >
+                <span className={`month-day-number ${isToday(day) ? 'today-badge' : ''}`}>
+                  {format(day, 'd')}
+                </span>
+                <div className="month-events">
+                  {dayEvents.slice(0, 3).map(event => (
+                    <div
+                      key={event.id}
+                      className="month-event"
+                      style={{ backgroundColor: event.calendarColor || '#3F51B5' }}
+                      onClick={(e) => { e.stopPropagation(); handleEventClick(event); }}
+                    >
+                      {event.summary}
+                    </div>
+                  ))}
+                  {dayEvents.length > 3 && (
+                    <span className="month-more">+{dayEvents.length - 3} more</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const renderScheduleView = () => {
     // Schedule view: Horizontal timeline with team members as columns
     const days = eachDayOfInterval({
       start: startOfWeek(currentDate, { weekStartsOn: 1 }),
       end: addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), 6)
     });
-    const hours = Array.from({ length: 12 }, (_, i) => i + 8); // 8 AM to 7 PM
 
     // Get team members or use a default list
     const members = selectedTeam?.members.map(m => m.user) || [
@@ -363,6 +686,16 @@ export default function Dashboard() {
     );
   };
 
+  const renderCalendarView = () => {
+    switch (viewMode) {
+      case 'day': return renderDayView();
+      case 'week': return renderWeekView();
+      case 'month': return renderMonthView();
+      case 'schedule': return renderScheduleView();
+      default: return renderWeekView();
+    }
+  };
+
   if (loading) {
     return (
       <div className="loading-screen">
@@ -413,6 +746,46 @@ export default function Dashboard() {
                   <option key={team.id} value={team.id}>{team.name}</option>
                 ))}
               </select>
+              <button
+                className="btn btn-secondary create-team-btn"
+                onClick={() => { setShowCreateTeam(true); setTeamFormData({ name: '', description: '' }); setTeamFormError(''); }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                </svg>
+                Create Team
+              </button>
+              {showCreateTeam && (
+                <div className="create-team-form">
+                  <div className="form-group">
+                    <label className="form-label">Team Name</label>
+                    <input
+                      className="form-input"
+                      type="text"
+                      value={teamFormData.name}
+                      placeholder="My Team"
+                      onChange={e => setTeamFormData(prev => ({ ...prev, name: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Description</label>
+                    <input
+                      className="form-input"
+                      type="text"
+                      value={teamFormData.description}
+                      placeholder="Optional description"
+                      onChange={e => setTeamFormData(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                  </div>
+                  {teamFormError && <div className="form-error">{teamFormError}</div>}
+                  <div className="create-team-actions">
+                    <button className="btn btn-primary" onClick={handleCreateTeam} disabled={teamFormSubmitting}>
+                      {teamFormSubmitting ? 'Creating...' : 'Create'}
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => setShowCreateTeam(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="sidebar-section">
@@ -476,7 +849,7 @@ export default function Dashboard() {
           </div>
 
           <div className="top-bar-right">
-            <button className="btn btn-primary">
+            <button className="btn btn-primary" onClick={() => openCreateEventModal()}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
               </svg>
@@ -517,7 +890,7 @@ export default function Dashboard() {
 
         {/* Calendar View */}
         <div className="calendar-container">
-          {viewMode === 'schedule' ? renderScheduleView() : renderWeekView()}
+          {renderCalendarView()}
         </div>
       </main>
 
@@ -573,8 +946,159 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="event-panel-actions">
-            <button className="btn btn-secondary">Edit</button>
-            <button className="btn btn-danger">Delete</button>
+            <button className="btn btn-secondary" onClick={openEditEventModal}>Edit</button>
+            <button className="btn btn-danger" onClick={() => setShowDeleteConfirm(true)}>Delete</button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && selectedEvent && (
+        <div className="modal-overlay" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="modal-content modal-small" onClick={e => e.stopPropagation()}>
+            <h3>Delete Event</h3>
+            <p className="delete-confirm-text">
+              Are you sure you want to delete &quot;{selectedEvent.summary || 'Untitled Event'}&quot;? This action cannot be undone.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowDeleteConfirm(false)} disabled={deleteSubmitting}>
+                Cancel
+              </button>
+              <button className="btn btn-danger" onClick={handleDeleteEvent} disabled={deleteSubmitting}>
+                {deleteSubmitting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Event Create/Edit Modal */}
+      {showEventModal && (
+        <div className="modal-overlay" onClick={() => setShowEventModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{eventModalMode === 'create' ? 'Create Event' : 'Edit Event'}</h3>
+              <button className="btn btn-ghost btn-icon" onClick={() => setShowEventModal(false)}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label className="form-label">Title</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={eventFormData.title}
+                  placeholder="Event title"
+                  onChange={e => setEventFormData(prev => ({ ...prev, title: e.target.value }))}
+                  autoFocus
+                />
+              </div>
+              <div className="form-row">
+                <div className="form-group form-group-flex">
+                  <label className="form-label">Start Date</label>
+                  <input
+                    className="form-input"
+                    type="date"
+                    value={eventFormData.startDate}
+                    onChange={e => setEventFormData(prev => ({ ...prev, startDate: e.target.value }))}
+                  />
+                </div>
+                {!eventFormData.allDay && (
+                  <div className="form-group form-group-flex">
+                    <label className="form-label">Start Time</label>
+                    <input
+                      className="form-input"
+                      type="time"
+                      value={eventFormData.startTime}
+                      onChange={e => setEventFormData(prev => ({ ...prev, startTime: e.target.value }))}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="form-row">
+                <div className="form-group form-group-flex">
+                  <label className="form-label">End Date</label>
+                  <input
+                    className="form-input"
+                    type="date"
+                    value={eventFormData.endDate}
+                    onChange={e => setEventFormData(prev => ({ ...prev, endDate: e.target.value }))}
+                  />
+                </div>
+                {!eventFormData.allDay && (
+                  <div className="form-group form-group-flex">
+                    <label className="form-label">End Time</label>
+                    <input
+                      className="form-input"
+                      type="time"
+                      value={eventFormData.endTime}
+                      onChange={e => setEventFormData(prev => ({ ...prev, endTime: e.target.value }))}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="form-group">
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={eventFormData.allDay}
+                    onChange={e => setEventFormData(prev => ({ ...prev, allDay: e.target.checked }))}
+                  />
+                  All day
+                </label>
+              </div>
+              {eventModalMode === 'edit' && (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Description</label>
+                    <textarea
+                      className="form-input form-textarea"
+                      value={eventFormData.description}
+                      placeholder="Add description"
+                      rows={3}
+                      onChange={e => setEventFormData(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Location</label>
+                    <input
+                      className="form-input"
+                      type="text"
+                      value={eventFormData.location}
+                      placeholder="Add location"
+                      onChange={e => setEventFormData(prev => ({ ...prev, location: e.target.value }))}
+                    />
+                  </div>
+                </>
+              )}
+              <div className="form-group">
+                <label className="form-label">Calendar</label>
+                <select
+                  className="form-input"
+                  value={eventFormData.calendarId}
+                  onChange={e => setEventFormData(prev => ({ ...prev, calendarId: e.target.value }))}
+                >
+                  {calendars.map(cal => (
+                    <option key={cal.id} value={cal.id}>{cal.summary}</option>
+                  ))}
+                </select>
+              </div>
+              {eventFormError && <div className="form-error">{eventFormError}</div>}
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowEventModal(false)} disabled={eventFormSubmitting}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={handleEventFormSubmit} disabled={eventFormSubmitting}>
+                {eventFormSubmitting
+                  ? (eventModalMode === 'create' ? 'Creating...' : 'Saving...')
+                  : (eventModalMode === 'create' ? 'Create Event' : 'Save Changes')
+                }
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -672,6 +1196,26 @@ export default function Dashboard() {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+        }
+
+        .create-team-btn {
+          margin-top: 10px;
+          width: 100%;
+          font-size: 0.8125rem;
+        }
+
+        .create-team-form {
+          margin-top: 12px;
+          padding: 12px;
+          background: var(--background);
+          border-radius: var(--radius-md);
+          border: 1px solid var(--border);
+        }
+
+        .create-team-actions {
+          display: flex;
+          gap: 8px;
+          margin-top: 8px;
         }
 
         /* Main Content */
@@ -912,6 +1456,104 @@ export default function Dashboard() {
           z-index: 1;
         }
 
+        /* Month View */
+        .month-view {
+          background: var(--surface);
+          border-radius: 12px;
+          overflow: hidden;
+          box-shadow: var(--shadow-card);
+        }
+
+        .month-header {
+          display: grid;
+          grid-template-columns: repeat(7, 1fr);
+          border-bottom: 1px solid var(--border);
+        }
+
+        .month-weekday {
+          padding: 12px;
+          text-align: center;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+          text-transform: uppercase;
+        }
+
+        .month-grid {
+          display: grid;
+          grid-template-columns: repeat(7, 1fr);
+        }
+
+        .month-cell {
+          min-height: 100px;
+          border-right: 1px solid var(--border);
+          border-bottom: 1px solid var(--border);
+          padding: 6px;
+          cursor: pointer;
+          transition: background var(--transition-fast);
+        }
+
+        .month-cell:nth-child(7n) {
+          border-right: none;
+        }
+
+        .month-cell:hover {
+          background: var(--background);
+        }
+
+        .month-cell.other-month {
+          opacity: 0.4;
+        }
+
+        .month-cell.today {
+          background: rgba(63, 81, 181, 0.05);
+        }
+
+        .month-day-number {
+          display: inline-block;
+          font-size: 0.8125rem;
+          font-weight: 500;
+          margin-bottom: 4px;
+        }
+
+        .today-badge {
+          background: var(--primary);
+          color: white;
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .month-events {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .month-event {
+          padding: 2px 4px;
+          border-radius: 3px;
+          font-size: 0.6875rem;
+          color: white;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          cursor: pointer;
+        }
+
+        .month-event:hover {
+          opacity: 0.85;
+        }
+
+        .month-more {
+          font-size: 0.6875rem;
+          color: var(--text-secondary);
+          padding: 1px 4px;
+        }
+
         /* Schedule View */
         .schedule-view {
           background: var(--surface);
@@ -1089,6 +1731,108 @@ export default function Dashboard() {
 
         .btn-danger:hover {
           background: #d32f2f;
+        }
+
+        /* Modal */
+        .modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.4);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2000;
+          animation: fadeIn 0.15s ease-out;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        .modal-content {
+          background: var(--surface);
+          border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-modal);
+          width: 480px;
+          max-width: 90vw;
+          max-height: 90vh;
+          overflow-y: auto;
+          animation: modalSlideUp 0.2s ease-out;
+        }
+
+        .modal-small {
+          width: 380px;
+          padding: 24px;
+        }
+
+        @keyframes modalSlideUp {
+          from { transform: translateY(20px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+
+        .modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 20px 24px 0;
+        }
+
+        .modal-header h3 {
+          font-size: 1.125rem;
+        }
+
+        .modal-body {
+          padding: 20px 24px;
+        }
+
+        .modal-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+          padding: 16px 24px;
+          border-top: 1px solid var(--border);
+        }
+
+        .form-row {
+          display: flex;
+          gap: 12px;
+        }
+
+        .form-group-flex {
+          flex: 1;
+        }
+
+        .form-checkbox {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          cursor: pointer;
+          font-size: 0.875rem;
+          color: var(--text-primary);
+        }
+
+        .form-checkbox input {
+          accent-color: var(--primary);
+        }
+
+        .form-textarea {
+          resize: vertical;
+          min-height: 60px;
+          font-family: var(--font-primary);
+        }
+
+        .form-error {
+          color: var(--danger);
+          font-size: 0.8125rem;
+          margin-top: 4px;
+        }
+
+        .delete-confirm-text {
+          margin: 16px 0;
+          color: var(--text-secondary);
+          font-size: 0.9rem;
+          line-height: 1.5;
         }
 
         /* Responsive */
