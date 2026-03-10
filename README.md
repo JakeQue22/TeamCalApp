@@ -30,8 +30,49 @@ A powerful team scheduling application that enhances Google Calendar with team m
 - Node.js 18+
 - Google Cloud Console account
 - npm or yarn
+- Docker & Docker Compose (optional, for containerized setup)
 
-### Installation
+### Option A: Docker Compose (Recommended)
+
+The easiest way to run TeamCal is with Docker Compose. All services are bound to `0.0.0.0` so they're accessible from any network interface.
+
+1. **Set up environment variables**
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in your Google OAuth credentials (see "Set up Google OAuth" below).
+
+2. **Start with Docker Compose**
+
+```bash
+docker compose up --build
+```
+
+The application will be available at:
+- Frontend: http://0.0.0.0:3000
+- Backend API: http://0.0.0.0:3001
+
+To run in the background:
+
+```bash
+docker compose up --build -d
+```
+
+To stop:
+
+```bash
+docker compose down
+```
+
+SQLite data is persisted in a Docker volume (`sqlite-data`). To reset the database:
+
+```bash
+docker compose down -v
+```
+
+### Option B: Local Development
 
 1. **Clone the repository**
 
@@ -63,21 +104,14 @@ PORT=3001
 NODE_ENV=development
 ```
 
-4. **Set up Google OAuth**
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-2. Create OAuth 2.0 Client ID credentials
-3. Add `http://localhost:3001/auth/google/callback` to authorized redirect URIs
-4. Add `http://localhost:3000` to authorized JavaScript origins
-
-5. **Initialize the database**
+4. **Initialize the database**
 
 ```bash
 npm run db:generate
 npm run db:push
 ```
 
-6. **Start development servers**
+5. **Start development servers**
 
 ```bash
 npm run dev
@@ -86,6 +120,17 @@ npm run dev
 The application will be available at:
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:3001
+
+### Set up Google OAuth
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+2. Create OAuth 2.0 Client ID credentials
+3. Add `http://localhost:3001/auth/google/callback` to authorized redirect URIs
+4. Add `http://localhost:3000` to authorized JavaScript origins
+
+If using Docker with `0.0.0.0`, also add:
+- `http://0.0.0.0:3001/auth/google/callback` to authorized redirect URIs
+- `http://0.0.0.0:3000` to authorized JavaScript origins
 
 ## Project Structure
 
@@ -110,6 +155,9 @@ teamcalapp/
 │   │   └── dashboard/     # Dashboard
 │   │       └── page.tsx
 │   └── ...
+├── Dockerfile              # Container build
+├── docker-compose.yml      # Docker Compose setup
+├── .dockerignore
 ├── package.json
 ├── tsconfig.json
 ├── next.config.js
