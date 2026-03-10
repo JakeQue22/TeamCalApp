@@ -80,9 +80,7 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
       }
       
       // Redirect to frontend
-      const frontendUrl = process.env.NODE_ENV === 'production' 
-        ? process.env.FRONTEND_URL 
-        : 'http://localhost:3000';
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       
       res.redirect(`${frontendUrl}/dashboard`);
     });

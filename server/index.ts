@@ -20,10 +20,15 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(compression());
+
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
+  : process.env.NODE_ENV === 'production'
+    ? [process.env.FRONTEND_URL || 'http://localhost:3000']
+    : ['http://localhost:3000'];
+
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL 
-    : ['http://localhost:3000'],
+  origin: allowedOrigins,
   credentials: true,
 }));
 app.use(express.json());
@@ -67,15 +72,17 @@ app.use((req: Request, res: Response) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const HOST = process.env.HOST || '0.0.0.0';
+const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+app.listen(Number(PORT), HOST, () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
 ║   🔷 TeamCal Server Running                               ║
 ║                                                           ║
-║   Local:    http://localhost:${PORT}                        ║
-║   API:      http://localhost:${PORT}/api                   ║
-║   Auth:     http://localhost:${PORT}/auth                  ║
+║   Local:    http://${displayHost}:${PORT}                        ║
+║   API:      http://${displayHost}:${PORT}/api                   ║
+║   Auth:     http://${displayHost}:${PORT}/auth                  ║
 ║                                                           ║
 ║   ⚠️  Don't forget to configure .env file                ║
 ║   ⚠️  Get credentials from Google Cloud Console           ║
