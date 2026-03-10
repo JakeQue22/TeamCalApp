@@ -27,7 +27,7 @@ RUN npm run build
 FROM base AS runner
 WORKDIR /app
 
-ENV NODE_ENV=production
+ENV NODE_ENV=development
 ENV HOST=0.0.0.0
 ENV PORT=3001
 ENV NEXT_TELEMETRY_DISABLED=1

@@ -73,15 +73,16 @@ app.use((req: Request, res: Response) => {
 
 // Start server
 const HOST = process.env.HOST || '0.0.0.0';
+const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
 app.listen(Number(PORT), HOST, () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
 ║   🔷 TeamCal Server Running                               ║
 ║                                                           ║
-║   Local:    http://${HOST}:${PORT}                        ║
-║   API:      http://${HOST}:${PORT}/api                   ║
-║   Auth:     http://${HOST}:${PORT}/auth                  ║
+║   Local:    http://${displayHost}:${PORT}                        ║
+║   API:      http://${displayHost}:${PORT}/api                   ║
+║   Auth:     http://${displayHost}:${PORT}/auth                  ║
 ║                                                           ║
 ║   ⚠️  Don't forget to configure .env file                ║
 ║   ⚠️  Get credentials from Google Cloud Console           ║
